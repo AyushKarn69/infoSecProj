@@ -1,0 +1,243 @@
+RIS KSHARE - PROJECT, CONTROL ROOM, AND USER GUIDE
+Updated: 14 November 2026
+
+======================================================================
+1. WHAT THIS PROJECT IS ABOUT
+======================================================================
+
+RiskShare is an academic cybersecurity research prototype for Risk-Adaptive
+Threshold Secret Sharing. It explores how a key-management system could make
+recovery stricter when risk rises, while continuing to allow recovery when
+enough servers remain available.
+
+A threshold scheme divides key material among multiple participants. In this
+prototype, a vault key is shared across five node stores. A 2-of-5 policy
+requires any two valid shares to recover the key; 3-of-5 or 4-of-5 requires
+more shares. This project uses Asmuth-Bloom sharing (ABSS-I and ABSS-II) and
+traceability prototypes based on the Leslie-Dutta paper. The primary goal is
+not to invent those schemes. The proposed extension is to connect an
+explainable risk policy to fresh cryptographic epochs.
+
+RiskShare also encrypts uploaded files with AES-256-GCM. The file is encrypted
+with a random Data Encryption Key (DEK); the DEK is then converted to an
+integer and split across the five nodes. Vault ID, epoch ID, and encryption
+version are authenticated as additional data. The dashboard does not display
+the plaintext DEK or individual shares.
+
+The current local mode is a research demonstrator. The FastAPI control API
+runs five logical node agents on one host, each with a separate local SQLite
+share store. PostgreSQL can store control-plane records. A separate-container
+Compose design exists, but it has not been verified by running Docker in this
+workspace. The recovery operation is still performed within the API process.
+The project is not production-ready and must not be used to protect production
+secrets.
+
+======================================================================
+2. THE PROPOSED RISK-ADAPTIVE SOLUTION AND EXPERIMENTS
+======================================================================
+
+The underlying research scheme chooses its threshold when shares are made.
+Changing a label from 2-of-5 to 4-of-5 would not change the old shares or make
+them safer. RiskShare therefore proposes a real threshold transition:
+
+1. The risk engine scores recorded events using explicit weights and decay.
+2. A policy maps risk to a target quorum: 0-29 -> 2-of-5, 30-59 -> 3-of-5,
+   and 60-100 -> 4-of-5.
+3. When a stricter threshold is required, RiskShare generates a fresh DEK,
+   re-encrypts the vault content under a fresh epoch, and makes a new share set
+   at the target threshold.
+4. The new shares are distributed to all five nodes. Only after all nodes
+   acknowledge distribution is the new epoch activated. If distribution fails,
+   the transition fails closed and recovery can be frozen rather than silently
+   using an incomplete share generation.
+5. Lowering the threshold is more cautious: the policy applies cooldown and
+   administrator authorization before de-escalation.
+
+This is the project's applied research contribution: combining an explainable
+risk policy with fresh cryptographic share epochs, then examining the security
+and availability trade-off against fixed thresholds. It does not claim to
+have invented ABSS or TTSS, nor to prove new cryptographic security results.
+
+The experiment runner uses the actual prototype crypto routines, with five
+random key/share generations per threshold and 25 scripted combinations of
+node availability and compromise assumptions per generation. The recorded
+run has 125 rows per policy:
+
+  Policy             Legitimate recovery success    Scripted attacker reconstruction
+  Fixed 2-of-5        80%                            60%
+  Fixed 3-of-5        60%                            40%
+  Fixed 4-of-5        40%                            20%
+  Risk-adaptive       48%                            20%
+
+The data illustrates the expected trade-off in these scenarios: raising the
+threshold reduces the number of the tested compromise cases in which the
+attacker has enough shares, but it also makes recovery less available when
+nodes are offline. The adaptive policy produced a lower scripted attacker
+reconstruction rate than fixed 2-of-5, while its legitimate recovery rate was
+also lower. These values depend on the deliberately chosen scenarios. The
+attacker column is a count of scripted cases, not a probability that a real
+attacker succeeds. Five trials are too few to make meaningful claims about
+relative performance.
+
+Measured locally in the recorded run, mean successful reconstruction was
+about 4.1-4.3 ms. Mean share generation varied from about 58 to 82 ms across
+the fixed thresholds and was about 66 ms for adaptive scenarios. These are
+workstation-specific prototype measurements, not benchmarks or guarantees.
+The run does not measure network performance, distributed database load,
+production attack rates, concurrent users, or formal security. See
+docs/experiments/README.md and docs/experiments/results/ for the runner notes
+and generated CSV, JSON, and SVG artifacts.
+
+======================================================================
+3. CONTROL ROOM WEB PAGES
+======================================================================
+
+The web application is served at /control-room. Its navigation contains the
+following pages. The displayed operational data is fetched from the backend;
+events created in Attack Lab are explicitly simulated.
+
+LOGIN
+Purpose: Establish an operator or administrator session. The demo has the
+two configured accounts and roles; there is no user-registration screen.
+After login, the session role is shown in the Control Room. Signing out clears
+the saved browser session.
+
+OVERVIEW
+Purpose: Give a quick operational summary. It shows top-level vault, quorum,
+risk, node, or recovery indicators; a chart of backend risk contributions; a
+five-node topology; and recent audit events. It is the starting point for
+spotting a problem and navigating to the detailed page for it.
+
+VAULTS
+Purpose: Create vault records and manage encrypted content and epochs. A user
+can create a vault record. An administrator can select a file and initialize
+the vault: the API encrypts the file, creates a DEK and threshold shares, and
+requires acknowledgements from all five nodes. For an active vault, the page
+shows the active epoch, threshold, encryption version, and controls to rotate
+the key or request recovery. Secret key material is not displayed.
+
+NODE NETWORK
+Purpose: Inspect the five node agents and their share-store status. The page
+shows topology, online/offline status, risk score, stored generation count,
+and a shortened signing-key fingerprint. In local mode, the nodes are
+separate logical stores on one physical host, not independent machines.
+
+RISK ENGINE
+Purpose: Explain the current risk score and quorum policy. It shows weighted,
+decayed event contributions; active and target thresholds; and the policy
+bands. It also indicates when recovery is frozen during an unsafe epoch
+transition. This page is primarily for monitoring and explanation; risk is
+changed by recorded events, including administrator-run simulations.
+
+RECOVERY
+Purpose: Request and approve controlled recovery. An authenticated user
+selects an active vault and starts a pending request. A different
+administrator enters the request ID and approves it. On success, the recovered
+plaintext file is downloaded to that administrator's device. The requester
+cannot approve their own request. Recovery is rejected while a required safe
+transition is frozen or if enough valid node shares cannot be obtained.
+
+ATTACK LAB
+Purpose: Demonstrate how selected simulated security events affect the real
+risk engine and policy workflow. An administrator chooses an event kind and
+target node, and may choose to take that node offline. The page shows the
+observed risk and quorum response. If a real epoch transition is triggered,
+the backend attempts to create and distribute a new cryptographic generation.
+These are controlled simulations, not real attacks. Resetting the simulation
+through the administrator-only API endpoint brings nodes online and clears
+persisted risk events and node error counters; vaults, epochs, and audit records
+are retained. The current dashboard page does not display a reset button.
+
+TRACEABILITY
+Purpose: Run the TTSS-II tracing prototype against a selected vault and a
+user-specified set of leaked node IDs. The tracer uses a reconstruction-box
+interface and returns the prototype's identified nodes, proof, and public
+verification result. This is an experimental investigation feature, not a
+formal guarantee that every leak can be traced or that false accusations are
+impossible. Access is administrator-only.
+
+AUDIT
+Purpose: Review the persisted audit events, their actors and timestamps, and
+the result of checking the linked hash chain. The Overview page shows only
+recent events; this page provides the audit view. A hash chain can reveal
+changes to records in the chain, but this prototype has no external signed
+checkpoint, so it is not an independently anchored audit service.
+
+CONFIGURATION
+Purpose: Show non-secret runtime settings such as the API endpoint, storage
+mode, node transport, cryptographic components, and research-prototype status.
+Secret values are intentionally hidden. This page describes the current
+build; it is not a full configuration editor.
+
+======================================================================
+4. USER HAPPY FLOW
+======================================================================
+
+1. Start the API and open http://localhost:8000/control-room.
+2. Sign in as operator or admin. In a demonstration, keep the operator and
+   administrator sessions in separate browser profiles or browsers so the
+   recovery approver is a distinct user.
+3. Open Vaults and create a vault record. The record begins uninitialized.
+4. Sign in as admin if needed, select the vault, choose the content file, and
+   select Encrypt and distribute. All five nodes must acknowledge the shares.
+   The page then displays the active epoch and threshold.
+5. Observe Overview, Node network, and Risk engine to see the active vault,
+   node status, and current policy.
+6. In Attack Lab, an administrator can run a clearly labeled scenario to
+   demonstrate risk changes. If escalation is required, RiskShare creates a
+   fresh key and epoch. For reliable recovery in a demo, do not leave a node
+   offline; use the simulator reset if a test intentionally took one offline.
+7. In the operator session, open Recovery and request recovery for the vault.
+   Copy the request ID.
+8. In a separate admin session, open Recovery, enter that request ID, and
+   approve. If the active quorum is met and recovery is not frozen, the file
+   is reconstructed and downloaded.
+9. Optionally use Traceability to examine a simulated leak, then check Audit
+   to review the event history and hash-chain verification.
+
+======================================================================
+5. WHAT EACH ROLE CAN DO
+======================================================================
+
+OPERATOR
+- Sign in, view dashboard and operational status, inspect vaults, risk, nodes,
+  audit information, and configuration.
+- Create a vault record.
+- Request recovery for an active vault. The operator cannot approve that
+  request; an administrator must approve it.
+- Operator cannot initialize a vault with a file, rotate keys, simulate
+  attacks, reset the simulation, or run trace investigations through the
+  administrator-only actions.
+
+ADMINISTRATOR
+- Perform the operator's authenticated viewing and vault-record actions.
+- Initialize vault content by encrypting and distributing its DEK shares.
+- Rotate an active vault's key/epoch and authorize policy de-escalation where
+  applicable.
+- Approve another user's pending recovery request. The same account that made
+  a request is explicitly blocked from approving it.
+- Run Attack Lab scenarios and optionally take a simulated node offline.
+- Use the administrator-only simulator reset API endpoint if a test needs a
+  clean risk state. Reset clears risk events and error counters but keeps
+  vaults, epochs, and audit records; there is no reset button on the page.
+- Run TTSS-II trace investigations and inspect verification results.
+
+Roles are enforced by the API as well as reflected in the UI controls. This
+prototype uses two configured demo accounts rather than a full identity,
+account-management, or enterprise authorization system.
+
+======================================================================
+6. IMPORTANT LIMITATIONS
+======================================================================
+
+RiskShare is a research demonstrator, not production key-management software.
+The local five nodes share one physical host. Recovery still runs in the API
+process. The Compose/mTLS deployment and live Redis Streams integration have
+not been exercised end-to-end in this workspace. Tracing context is
+process-memory state. Rate limits and token revocations are process-local.
+ABSS share residues do not authenticate themselves. The cryptographic
+prototypes, particularly traceability and non-imputability behavior, need
+independent expert review; tests are not formal proofs. The experiment results
+are scenario-based measurements, not real-world security probabilities.
+
+END OF GUIDE

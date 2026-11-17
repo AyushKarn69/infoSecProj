@@ -1,0 +1,128 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: riskshare
+      POSTGRES_USER: riskshare
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U riskshare -d riskshare"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  node-1:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.node_agent.app:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/node-1-key.pem", "--ssl-certfile", "/certs/node-1.pem", "--ssl-ca-certs", "/certs/ca.pem", "--ssl-cert-reqs", "2"]
+    environment:
+      RISKSHARE_NODE_ID: "1"
+      RISKSHARE_CONTROL_SECRET: "${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}"
+      RISKSHARE_SIMULATION_ENABLED: "true"
+      RISKSHARE_NODE_DATA: /data/node.sqlite3
+    volumes: ["./dev-certs:/certs:ro", node-1-data:/data]
+    healthcheck: &node-health
+      test: ["CMD", "python", "-c", "import ssl,urllib.request; c=ssl.create_default_context(cafile='/certs/ca.pem'); c.load_cert_chain('/certs/control-api.pem','/certs/control-api-key.pem'); urllib.request.urlopen('https://localhost:8443/health', context=c, timeout=2).read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [data-plane]
+
+  node-2:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.node_agent.app:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/node-2-key.pem", "--ssl-certfile", "/certs/node-2.pem", "--ssl-ca-certs", "/certs/ca.pem", "--ssl-cert-reqs", "2"]
+    environment:
+      RISKSHARE_NODE_ID: "2"
+      RISKSHARE_CONTROL_SECRET: "${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}"
+      RISKSHARE_SIMULATION_ENABLED: "true"
+      RISKSHARE_NODE_DATA: /data/node.sqlite3
+    volumes: ["./dev-certs:/certs:ro", node-2-data:/data]
+    healthcheck: *node-health
+    networks: [data-plane]
+
+  node-3:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.node_agent.app:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/node-3-key.pem", "--ssl-certfile", "/certs/node-3.pem", "--ssl-ca-certs", "/certs/ca.pem", "--ssl-cert-reqs", "2"]
+    environment:
+      RISKSHARE_NODE_ID: "3"
+      RISKSHARE_CONTROL_SECRET: "${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}"
+      RISKSHARE_SIMULATION_ENABLED: "true"
+      RISKSHARE_NODE_DATA: /data/node.sqlite3
+    volumes: ["./dev-certs:/certs:ro", node-3-data:/data]
+    healthcheck: *node-health
+    networks: [data-plane]
+
+  node-4:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.node_agent.app:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/node-4-key.pem", "--ssl-certfile", "/certs/node-4.pem", "--ssl-ca-certs", "/certs/ca.pem", "--ssl-cert-reqs", "2"]
+    environment:
+      RISKSHARE_NODE_ID: "4"
+      RISKSHARE_CONTROL_SECRET: "${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}"
+      RISKSHARE_SIMULATION_ENABLED: "true"
+      RISKSHARE_NODE_DATA: /data/node.sqlite3
+    volumes: ["./dev-certs:/certs:ro", node-4-data:/data]
+    healthcheck: *node-health
+    networks: [data-plane]
+
+  node-5:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.node_agent.app:app", "--host", "0.0.0.0", "--port", "8443", "--ssl-keyfile", "/certs/node-5-key.pem", "--ssl-certfile", "/certs/node-5.pem", "--ssl-ca-certs", "/certs/ca.pem", "--ssl-cert-reqs", "2"]
+    environment:
+      RISKSHARE_NODE_ID: "5"
+      RISKSHARE_CONTROL_SECRET: "${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}"
+      RISKSHARE_SIMULATION_ENABLED: "true"
+      RISKSHARE_NODE_DATA: /data/node.sqlite3
+    volumes: ["./dev-certs:/certs:ro", node-5-data:/data]
+    healthcheck: *node-health
+    networks: [data-plane]
+
+  control-api:
+    build: { context: .., dockerfile: infrastructure/docker/Dockerfile }
+    command: ["uvicorn", "services.control_api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      RISKSHARE_DATABASE_URL: "postgresql+psycopg://riskshare:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/riskshare"
+      RISKSHARE_DATA_DIR: /data
+      RISKSHARE_REDIS_URL: redis://redis:6379/0
+      RISKSHARE_CONTROL_SECRET: ${RISKSHARE_CONTROL_SECRET:?set RISKSHARE_CONTROL_SECRET}
+      RISKSHARE_AUTH_SECRET: ${RISKSHARE_AUTH_SECRET:?set RISKSHARE_AUTH_SECRET}
+      RISKSHARE_ADMIN_PASSWORD: ${RISKSHARE_ADMIN_PASSWORD:?set RISKSHARE_ADMIN_PASSWORD}
+      RISKSHARE_OPERATOR_PASSWORD: ${RISKSHARE_OPERATOR_PASSWORD:?set RISKSHARE_OPERATOR_PASSWORD}
+      RISKSHARE_NODE_URLS: https://node-1:8443,https://node-2:8443,https://node-3:8443,https://node-4:8443,https://node-5:8443
+      RISKSHARE_NODE_CA: /certs/ca.pem
+      RISKSHARE_CONTROL_CLIENT_CERT: /certs/control-api.pem
+      RISKSHARE_CONTROL_CLIENT_KEY: /certs/control-api-key.pem
+    volumes: ["./dev-certs:/certs:ro", control-data:/data]
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      node-1: { condition: service_healthy }
+      node-2: { condition: service_healthy }
+      node-3: { condition: service_healthy }
+      node-4: { condition: service_healthy }
+      node-5: { condition: service_healthy }
+    networks: [data-plane]
+
+networks:
+  data-plane: {}
+
+volumes:
+  redis-data: {}
+  postgres-data: {}
+  control-data: {}
+  node-1-data: {}
+  node-2-data: {}
+  node-3-data: {}
+  node-4-data: {}
+  node-5-data: {}

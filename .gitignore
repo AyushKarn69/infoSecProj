@@ -1,0 +1,38 @@
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+dist/
+build/
+node_modules/
+.next/
+out/
+*.py[cod]
+
+# Runtime state: node signing keys, share stores, control DB
+data/
+infrastructure/dev-certs/
+certs/
+*.sqlite3
+*.ed25519
+*.pem
+
+# Tool caches and build metadata
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+*.egg-info/
+*.tsbuildinfo
+
+# LaTeX intermediates
+paper/*.aux
+paper/*.log
+paper/*.bbl
+paper/*.blg
+paper/*.out
+
+# Third-party reference paper (not redistributed)
+2025-1561*.pdf

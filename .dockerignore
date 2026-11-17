@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+__pycache__
+*.py[cod]
+.venv
+venv
+data
+infrastructure/dev-certs
+apps/dashboard/node_modules
+apps/dashboard/.next
+apps/dashboard/out
